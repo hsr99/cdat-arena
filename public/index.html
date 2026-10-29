@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDAT Arena — 4-Model Battle</title>
+<link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo"><div class="logo-pulse"></div>CDAT Arena</div>
+    <div class="badge">live eval</div>
+    <div class="badge-arena">4-model battle</div>
+  </div>
+  <div class="topbar-right">
+    <!-- RATE LIMITER INDICATOR -->
+    <div class="rl-badge rl-idle" id="rlBadge" title="Groq rate limiter — 1 request every 2.2s">
+      <div class="rl-dot"></div>
+      <span style="letter-spacing:0.5px;">GROQ RL</span>
+      <span style="color:var(--text3);margin:0 2px">|</span>
+      <span id="rlQueueNum" class="rl-queue-num">0</span>
+      <span style="color:var(--text3);font-size:8px;margin-left:1px">queued</span>
+    </div>
+
+    <div class="model-legend">
+      <div class="ml-item"><div class="ml-dot" style="background:var(--ma)"></div>A: llama-3.1-8b</div>
+      <div class="ml-item"><div class="ml-dot" style="background:var(--mb)"></div>B: llama-3.3-70b</div>
+      <div class="ml-item"><div class="ml-dot" style="background:var(--mc)"></div>C: Qwen2.5-7B</div>
+      <div class="ml-item"><div class="ml-dot" style="background:var(--md)"></div>D: DeepSeek-R1</div>
+    </div>
+    <div class="stats-row">
+      <div class="stat-item"><div class="sv" id="statTurn" style="color:var(--blue)">0</div><div class="sl">turns</div></div>
+      <div class="stat-item"><div class="sv" id="statLeader" style="color:var(--teal)">—</div><div class="sl">leading</div></div>
+    </div>
+    <button class="btn btn-dl" id="btnDl" disabled onclick="downloadJSON()">↓ JSON</button>
+    <button class="btn btn-ghost" id="btnReset" onclick="resetAll()">↺ Reset</button>
+  </div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-title">Pipeline</div>
+    <div class="pipe-stage s-active" id="ps0"><div class="pipe-num">0</div><div class="pipe-stage-name">Inputs & Setup</div><div class="pipe-stage-sub">Seed · Context</div></div>
+    <div class="pipe-connector"></div>
+    <div class="pipe-stage" id="ps1"><div class="pipe-num">1</div><div class="pipe-stage-name">Generate ×4</div><div class="pipe-stage-sub">All models, Turn N</div></div>
+    <div class="pipe-connector"></div>
+    <div class="pipe-stage" id="ps2"><div class="pipe-num">2</div><div class="pipe-stage-name">Update Context</div><div class="pipe-stage-sub">Facts · Summaries</div></div>
+    <div class="pipe-connector"></div>
+    <div class="pipe-stage" id="ps3"><div class="pipe-num">3</div><div class="pipe-stage-name">Gate Check ×4</div><div class="pipe-stage-sub">CDAT coherence</div></div>
+    <div class="pipe-connector"></div>
+    <div class="pipe-stage" id="ps4"><div class="pipe-num">4</div><div class="pipe-stage-name">Judge — 10 Metrics</div><div class="pipe-stage-sub">6 single + 4 multi-turn</div></div>
+    <div class="pipe-connector"></div>
+    <div class="pipe-stage" id="ps5"><div class="pipe-num">5</div><div class="pipe-stage-name">Score & Rank</div><div class="pipe-stage-sub">Turn winner · JSON</div></div>
+    <div class="pipe-connector"></div>
+    <div class="pipe-stage" id="ps6"><div class="pipe-num">6</div><div class="pipe-stage-name">Aggregate</div><div class="pipe-stage-sub">Curves · Leaderboard</div></div>
+    <div class="pipe-connector"></div>
+    <div class="pipe-stage" id="ps7"><div class="pipe-num">7</div><div class="pipe-stage-name">TTCW Analysis</div><div class="pipe-stage-sub">Torrance Test · 4 dims</div></div>
+
+    <!-- RATE LIMITER SIDEBAR BOX -->
+    <div class="rl-sidebar-box" id="rlSidebarBox">
+      <div class="rl-sb-title">⏱ Groq Rate Limiter</div>
+      <div class="rl-sb-row">
+        <div class="rl-sb-label">Limit</div>
+        <div class="rl-sb-val">1 req / 2.2s</div>
+      </div>
+      <div class="rl-sb-row">
+        <div class="rl-sb-label">Queued</div>
+        <div class="rl-sb-val" id="rlSbQueued">0</div>
+      </div>
+      <div class="rl-sb-row">
+        <div class="rl-sb-label">Total sent</div>
+        <div class="rl-sb-val" id="rlSbTotal">0</div>
+      </div>
+      <div class="rl-sb-row">
+        <div class="rl-sb-label">Next slot in</div>
+        <div class="rl-sb-val" id="rlSbNext">—</div>
+      </div>
+      <div class="rl-countdown-bar-wrap">
+        <div class="rl-countdown-bar" id="rlCountdownBar"></div>
+      </div>
+      <div class="rl-waiting-list" id="rlWaitingList"></div>
+    </div>
+
+    <div class="turn-nav">
+      <div class="turn-nav-title">Turn Navigator</div>
+      <div class="turn-dots" id="turnDots"></div>
+    </div>
+
+    <div class="status-sec" id="statusSec" style="display:none;">
+      <div class="status-title">Status</div>
+      <div class="run-indicator"><div class="run-spin"></div><span id="statusTxt">Running…</span></div>
+      <div class="stage-note" id="stageNote"></div>
+    </div>
+  </div>
+
+  <!-- FEED -->
+  <div class="feed" id="feed">
+
+    <!-- SETUP VIEW -->
+    <div id="setupView" class="setup-area">
+      <div>
+        <div class="setup-title">Arena Battle Setup</div>
+        <div class="setup-sub">Configure a story seed. All 4 models generate each turn simultaneously. A judge LLM scores 10 metrics — 6 single-turn and 4 multi-turn — to determine per-turn winners. After battle, TTCW (Torrance Test for Creative Writing) analysis runs across all 4 dimensions.</div>
+      </div>
+
+      <div class="model-cards">
+        <div class="model-card mc-a"><div class="mcard-label">Model A</div><div class="mcard-name">llama-3.1-8b-instant</div><div class="mcard-provider">Groq · fast</div></div>
+        <div class="model-card mc-b"><div class="mcard-label">Model B</div><div class="mcard-name">llama-3.3-70b-versatile</div><div class="mcard-provider">Groq · flagship</div></div>
+        <div class="model-card mc-c"><div class="mcard-label">Model C</div><div class="mcard-name">Qwen2.5-7B-Instruct</div><div class="mcard-provider">HuggingFace Router</div></div>
+        <div class="model-card mc-d"><div class="mcard-label">Model D</div><div class="mcard-name">DeepSeek-R1</div><div class="mcard-provider">HuggingFace Router</div></div>
+      </div>
+
+      <div class="info-cards">
+        <div class="info-card">
+          <div class="ic-label">Single-Turn Metrics (6)</div>
+          <div class="ic-text">Surprise · Novelty · Lexical Diversity · Syntactic Complexity · Semantic Diversity · Coherence — scored per paragraph</div>
+        </div>
+        <div class="info-card">
+          <div class="ic-label">Multi-Turn Metrics (4)</div>
+          <div class="ic-text">Knowledge Retention · Conversation Completeness · Conversation Relevancy · Instruction Absorption — scored across turns</div>
+        </div>
+        <div class="info-card">
+          <div class="ic-label">TTCW — Post-Battle</div>
+          <div class="ic-text">Torrance Test for Creative Writing: Originality · Fluency · Flexibility · Elaboration — scored 1–5 per dimension per model</div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label class="field-label">Genre</label>
+          <input type="text" id="fGenre" placeholder="e.g. sci-fi, gothic horror, cyberpunk…" value="sci-fi">
+        </div>
+        <div class="field">
+          <label class="field-label">Tone</label>
+          <select id="fTone">
+            <option value="dark and atmospheric">Dark & atmospheric</option>
+            <option value="tense and urgent">Tense & urgent</option>
+            <option value="philosophical and measured">Philosophical & measured</option>
+            <option value="hopeful but melancholic">Hopeful but melancholic</option>
+            <option value="cold and clinical">Cold & clinical</option>
+            <option value="whimsical and strange">Whimsical & strange</option>
+          </select>
+        </div>
+        <div class="field form-full">
+          <label class="field-label">Characters (1–2, include a trait)</label>
+          <input type="text" id="fChars" placeholder="e.g. Dr. Mori — obsessive, methodical · ARCOS — the archive AI, deteriorating" value="Dr. Mori — obsessive, methodical · ARCOS — the archive AI, deteriorating">
+        </div>
+        <div class="field form-full">
+          <label class="field-label">Opening Situation (story seed)</label>
+          <textarea id="fSit" rows="3" placeholder="e.g. Dr. Mori descends into a flooded digital archive beneath a dying city…">Dr. Mori descends into a flooded digital archive beneath a dying city. Every server rack holds a century of erased memories. She has 12 hours before the next flood cycle.</textarea>
+          <div class="field-hint">This becomes Turn 1's prompt. Be specific — setting, stakes, and an opening image.</div>
+        </div>
+        <div class="field form-full">
+          <label class="field-label">Number of Turns</label>
+          <div class="turns-row">
+            <label>3</label>
+            <input type="range" id="fTurns" min="3" max="10" value="5" step="1" oninput="document.getElementById('fTurnsVal').textContent=this.value">
+            <label>10</label>
+            <div class="turns-val" id="fTurnsVal">5</div>
+            <span style="font-size:9px;color:var(--text3)">turns</span>
+          </div>
+          <div class="field-hint">Each turn calls all 4 models + judge. 5 turns ≈ ~25 API calls total. Allow 2–4 min. TTCW runs after completion.</div>
+        </div>
+      </div>
+
+      <button class="btn-begin" id="btnBegin" onclick="beginArena()">⚔ Begin Arena Battle</button>
+    </div>
+
+    <!-- STORY VIEW -->
+    <div id="storyView" class="story-area" style="display:none;"></div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="rpanel">
+    <div class="rp-sec">
+      <div class="rp-title">Score Curves</div>
+      <div class="chart-expand-btn" onclick="openModal('overall')">⤢ expand charts</div>
+      <div class="chart-wrap" id="cwOverall" onclick="openModal('overall')"><canvas id="chartOverall"></canvas></div>
+      <div class="curve-legend">
+        <div class="cl-item"><div class="cl-dot" style="background:var(--ma)"></div>A</div>
+        <div class="cl-item"><div class="cl-dot" style="background:var(--mb)"></div>B</div>
+        <div class="cl-item"><div class="cl-dot" style="background:var(--mc)"></div>C</div>
+        <div class="cl-item"><div class="cl-dot" style="background:var(--md)"></div>D</div>
+      </div>
+    </div>
+
+    <div class="rp-sec">
+      <div class="rp-title">Leaderboard</div>
+      <div id="lbDisplay"><div style="font-size:9.5px;color:var(--text3)">Awaiting turns…</div></div>
+    </div>
+
+    <div class="rp-sec">
+      <div class="rp-title">Avg Metrics</div>
+      <div class="chart-expand-btn" onclick="openModal('metrics')">⤢ expand</div>
+      <div id="metricMiniDisplay"><div style="font-size:9.5px;color:var(--text3)">Awaiting data…</div></div>
+    </div>
+
+    <div class="rp-sec" id="ttcwSidePanel" style="display:none;">
+      <div class="rp-title">TTCW Summary</div>
+      <div id="ttcwSideContent"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal-box" id="modalBox">
+    <button class="modal-close" onclick="closeModalDirect()">✕</button>
+    <div class="modal-title" id="modalTitle">Charts</div>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- Classic scripts intentionally share scope. Preserve this dependency order. -->
+<script src="/js/config.js"></script>
+<script src="/js/rate-limiter.js"></script>
+<script src="/js/state.js"></script>
+<script src="/js/charts.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/pipeline.js"></script>
+<script src="/js/metrics.js"></script>
+<script src="/js/ttcw.js"></script>
+<script src="/js/ui.js"></script>
+<script src="/js/modals.js"></script>
+<script src="/js/export.js"></script>
+<script src="/js/arena.js"></script>
+</body>
+</html>
